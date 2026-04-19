@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beauty Parlour Pro</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        :root { --pink: #ec407a; --bg: #fce4ec; }
+        body { font-family: sans-serif; background: var(--bg); margin: 0; padding: 15px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        .btn-primary { background: var(--pink); color: white; }
+        .btn-danger { background: #e53935; color: white; }
+        .hidden { display: none; }
+        .booking-item { border-left: 5px solid var(--pink); padding: 10px; margin-bottom: 10px; background: #fffafa; border-radius: 5px; }
+        input, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        .status { font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; }
+        .status-confirmed { background: #c8e6c9; color: #2e7d32; }
+        .status-rejected { background: #ffcdd2; color: #c62828; }
+    </style>
+</head>
+<body>
+
+<div id="authSection" class="card">
+    <h2>Welcome to Beauty Parlour</h2>
+    <p>Sign in to continue</p>
+    <button class="btn btn-primary" onclick="login()">Login with Google</button>
+</div>
+
+<div id="appSection" class="hidden">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 id="userName">Hello!</h3>
+        <button onclick="logout()" style="border:none; background:none; color:grey; cursor:pointer;">Logout</button>
+    </div>
+
+    <div id="customerView" class="hidden">
+        <div class="card">
+            <h4>Request Appointment</h4>
+            <label>Service</label>
+            <select id="service"><option>Haircut</option><option>Facial</option><option>Bridal</option></select>
+            <label>Preferred Date</label>
+            <input type="date" id="prefDate">
+            <button class="btn btn-primary" onclick="sendRequest()">Book Turn</button>
+        </div>
+        <h4>My Appointments</h4>
+        <div id="myBookings"></div>
+    </div>
+
+    <div id="ownerView" class="hidden">
+        <h4>Owner Dashboard</h4>
+        <div id="allRequests"></div>
+    </div>
+</div>
+
+<script>
+    const firebaseConfig = {
+        // PASTE YOUR CONFIG FROM FIREBASE CONSOLE HERE
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const ownerEmail = "owner@gmail.com"; // CHANGE THIS TO YOUR GMAIL
+
+    function login() {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        auth.signInWithPopup(provider);
+    }
+
+    function logout() { auth.signOut(); }
+
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('appSection').classList.remove('hidden');
+            document.getElementById('userName').innerText = "Hi, " + user.displayName;
+            
+            if(user.email === ownerEmail) {
+                document.getElementById('ownerView').classList.remove('hidden');
+                loadOwnerData();
+            } else {
+                document.getElementById('customerView').classList.remove('hidden');
+                loadCustomerData(user.uid);
+            }
+        } else {
+            document.getElementById('authSection').classList.remove('hidden');
+            document.getElementById('appSection').classList.add('hidden');
+        }
+    });
+
+    async function sendRequest() {
+        const user = auth.currentUser;
+        const service = document.getElementById('service').value;
+        const date = document.getElementById('prefDate').value;
+
+        await db.collection("appointments").add({
+            userId: user.uid,
+            userName: user.displayName,
+            service: service,
+            requestedDate: date,
+            status: "pending",
+            ownerNote: "",
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert("Request Sent!");
+    }
+
+    function loadCustomerData(uid) {
+        db.collection("appointments").where("userId", "==", uid)
+          .onSnapshot(snapshot => {
+            let html = "";
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                html += `<div class="booking-item">
+                    <b>${data.service}</b> - ${data.requestedDate} 
+                    <span class="status status-${data.status}">${data.status}</span>
+                    <p style="margin:5px 0 0; font-size:0.9em; color:#555">${data.ownerNote}</p>
+                </div>`;
+            });
+            document.getElementById('myBookings').innerHTML = html;
+          });
+    }
+
+    function loadOwnerData() {
+        db.collection("appointments").orderBy("createdAt", "desc")
+          .onSnapshot(snapshot => {
+            let html = "";
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                html += `<div class="card">
+                    <b>From: ${data.userName}</b><br>
+                    Service: ${data.service} (${data.requestedDate})<br>
+                    Status: <span class="status status-${data.status}">${data.status}</span>
+                    <hr>
+                    <input type="text" placeholder="Note (e.g. Come at 4 PM or Busy)" id="note-${doc.id}">
+                    <div style="display:flex; gap:5px;">
+                        <button class="btn btn-primary" onclick="updateStatus('${doc.id}', 'confirmed')">Confirm</button>
+                        <button class="btn btn-danger" onclick="updateStatus('${doc.id}', 'rejected')">Decline</button>
+                    </div>
+                </div>`;
+            });
+            document.getElementById('allRequests').innerHTML = html;
+          });
+    }
+
+    async function updateStatus(id, status) {
+        const note = document.getElementById(`note-${id}`).value;
+        await db.collection("appointments").doc(id).update({
+            status: status,
+            ownerNote: note || (status === 'confirmed' ? "See you soon!" : "Sorry, not available today.")
+        });
+    }
+</script>
+</body>
+</html>
